@@ -24,6 +24,7 @@ class server_impl{
     std::shared_ptr<chain_r> chain_router_;
     std::shared_ptr<resource_map_t> resource_map_cb_p_;
     std::shared_ptr<method_map_t> method_map_cb_p_;
+    ws_list_ptr websocket_list_;
 
     const std::shared_ptr<basic_r> & get_basic_router(){
         if(!basic_router_)
@@ -45,6 +46,7 @@ class server_impl{
                                                         std::placeholders::_1,
                                                         std::cref(resource_map_cb_p_),
                                                         std::cref(method_map_cb_p_),
+                                                        std::cref(websocket_list_),
                                                         std::cref(on_accept)
                                                         )
                                             )->run();
@@ -58,8 +60,14 @@ public:
         basic_router_{nullptr},
         chain_router_{nullptr},
         resource_map_cb_p_{nullptr},
-        method_map_cb_p_{nullptr}
+        method_map_cb_p_{nullptr},
+        websocket_list_{std::make_shared<ws_list>()}
     {}
+
+  const ws_list_ptr& websockets()
+  {
+    return websocket_list_;
+  }
 
     typename chain_r::ref route(const resource_regex_t & path_to_resource){
         return get_chain_router()->save_to_res_regex(path_to_resource).operator *();

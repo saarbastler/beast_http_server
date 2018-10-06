@@ -6,6 +6,8 @@
 #include <boost/unordered_map.hpp>
 #include <boost/regex.hpp>
 
+#include "websocket.hpp"
+
 namespace http {
 
 using resource_regex_t = std::string;
@@ -87,7 +89,7 @@ class session  : private cb_invoker, private boost::noncopyable,
             struct work_impl : work
             {
                 session<true, Body>& self_;
-                std::decay_t<Responce> msg_;
+                std::remove_reference_t<Responce> msg_;
 
                 work_impl(session<true, Body>& self, Responce&& msg)
                     : self_(self)
@@ -119,21 +121,24 @@ public:
 
     explicit session(boost::asio::ip::tcp::socket&& socket,
                      const std::shared_ptr<resource_map_t> & resource_map_cb_p,
-                     const std::shared_ptr<method_map_t> & method_map_cb_p)
+                     const std::shared_ptr<method_map_t> & method_map_cb_p,
+                     const ws_list_ptr & websocket_list)
         : timer_p_{std::make_shared<http::base::timer>(socket.get_executor(),
                                                        (std::chrono::steady_clock::time_point::max)())},
           connection_p_{std::make_shared<base::connection>(std::move(socket))},
           resource_map_cb_p_{resource_map_cb_p},
           method_map_cb_p_{method_map_cb_p},
+          websocket_list_{ websocket_list },
           queue_{*this}
     {}
 
     static void on_accept(boost::asio::ip::tcp::socket&& socket,
                           const std::shared_ptr<resource_map_t> & resource_map_cb_p,
                           const std::shared_ptr<method_map_t> & method_map_cb_p,
+                          const ws_list_ptr& websocket_list,
                           const std::function<void(session<true, ReqBody>&)> & on_accept_cb)
     {
-        auto new_session_p = std::make_shared<session<true, Body> >(std::move(socket), resource_map_cb_p, method_map_cb_p);
+        auto new_session_p = std::make_shared<session<true, Body> >(std::move(socket), resource_map_cb_p, method_map_cb_p, websocket_list);
         if(on_accept_cb)
             on_accept_cb(*new_session_p);
     }
@@ -232,6 +237,16 @@ protected:
         if(ec)
             return base::fail(ec, "read");
 
+        // See if it is a WebSocket Upgrade
+        if (boost::beast::websocket::is_upgrade(req_))
+        {
+          // Create a WebSocket websocket_session by transferring the socket
+          std::make_shared<websocket_session>(std::move(connection_p_->stream()),websocket_list_)
+            ->do_accept(std::move(req_));
+
+          return;
+        }
+
         process_request();
 
     }
@@ -306,6 +321,7 @@ protected:
     base::connection::ptr connection_p_;
     const std::shared_ptr<resource_map_t> & resource_map_cb_p_;
     const std::shared_ptr<method_map_t> & method_map_cb_p_;
+    ws_list_ptr websocket_list_;
     boost::beast::http::request<Body> req_;
     boost::beast::flat_buffer buffer_;
     queue queue_;
@@ -381,7 +397,7 @@ public:
             base::fail(ec, "close");
     }
 
-protected:
+private:
 
     void on_read(const boost::system::error_code & ec, std::size_t bytes_transferred)
     {
