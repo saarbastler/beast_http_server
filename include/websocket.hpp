@@ -17,6 +17,7 @@ namespace http {
   {
   public:
     using Callback = std::function<void(T&)>;
+    using DataReceived = std::function<void(T&, const std::string&)>;
 
     void registerWebsocket(const std::shared_ptr<T>& websocket)
     {
@@ -45,7 +46,12 @@ namespace http {
 
     void dataReceived(std::shared_ptr<T>&& websocket)
     {
-      std::cout << "WS received from " << websocket->remote() << ": " << boost::beast::buffers(websocket->buffer().data()) << std::endl;
+      const std::string& data{ boost::beast::buffers_to_string(websocket->buffer().data()) };
+
+      for (auto it : dataReceivedList)
+        it(*websocket, data);
+
+      //std::cout << "WS received from " << websocket->remote() << ": " << data /*boost::beast::buffers(websocket->buffer().data())*/ << std::endl;
     }
 
     void sendToAll(const std::string& txt) 
@@ -63,9 +69,15 @@ namespace http {
       callbacks.emplace_back(std::move(callback));
     }
 
+    void registerDataReceived(DataReceived &&dr)
+    {
+      dataReceivedList.emplace_back(std::move(dr));
+    }
+
   private:
 
     std::vector<Callback> callbacks;
+    std::vector<DataReceived> dataReceivedList;
     std::vector<std::weak_ptr<T>> websockets;
     std::string wstext;
   };
